@@ -1419,6 +1419,8 @@ pub struct AccountsDb {
 
     pub thread_pool_clean: ThreadPool,
 
+    pub thread_pool_hash: ThreadPool,
+
     bank_hash_stats: Mutex<HashMap<Slot, BankHashStats>>,
     accounts_delta_hashes: Mutex<HashMap<Slot, AccountsDeltaHash>>,
     accounts_hashes: Mutex<HashMap<Slot, (AccountsHash, /*capitalization*/ u64)>>,
@@ -2297,6 +2299,16 @@ pub fn make_min_priority_thread_pool() -> ThreadPool {
         .unwrap()
 }
 
+pub fn make_hash_thread_pool() -> ThreadPool {
+    // 1/8 of the number of cpus and up to 6 threads gives good balance for the system.
+    let num_threads = (num_cpus::get() / 8).clamp(2, 6);
+    rayon::ThreadPoolBuilder::new()
+        .thread_name(|i| format!("solAcctHash{i:02}"))
+        .num_threads(num_threads)
+        .build()
+        .unwrap()
+}
+
 #[cfg(all(RUSTC_WITH_SPECIALIZATION, feature = "frozen-abi"))]
 impl solana_frozen_abi::abi_example::AbiExample for AccountsDb {
     fn example() -> Self {
@@ -2488,6 +2500,7 @@ impl AccountsDb {
                 .build()
                 .unwrap(),
             thread_pool_clean: make_min_priority_thread_pool(),
+            thread_pool_hash: make_hash_thread_pool(),
             bank_hash_stats: Mutex::new(bank_hash_stats),
             accounts_delta_hashes: Mutex::new(HashMap::new()),
             accounts_hashes: Mutex::new(HashMap::new()),
@@ -7656,7 +7669,7 @@ impl AccountsDb {
         };
 
         let result = if use_bg_thread_pool {
-            self.thread_pool_clean.install(scan_and_hash)
+            self.thread_pool_hash.install(scan_and_hash)
         } else {
             scan_and_hash()
         };
